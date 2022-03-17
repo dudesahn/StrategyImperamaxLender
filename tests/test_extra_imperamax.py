@@ -1124,9 +1124,9 @@ def test_high_utilization(
     loss_okay = 10000
     max_uint = 2**256 - 1
 
-    tx = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
-    losses = token.balanceOf(whale) - startingWhale
-    print("These are our losses:", losses / (10 ** token.decimals()))
+    # this should revert since the whale would take a loss from the withdrawal
+    with brownie.reverts():
+        tx = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
 
 
 # ensure that we can't remove all funds from our pools, and try to manually allocate them

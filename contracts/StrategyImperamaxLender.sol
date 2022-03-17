@@ -175,8 +175,8 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     /// @notice Reorder our array of pools by increasing utilization. Deposits go to the last pool, withdrawals start from the front.
     function reorderPools() public onlyEmergencyAuthorized {
-        uint256[] memory utilizations = getEachPoolUtilization();
-        if (utilizations.length > 1) {
+        if (pools.length > 1) {
+            uint256[] memory utilizations = getEachPoolUtilization();
             _reorderPools(utilizations, 0, utilizations.length - 1);
         }
     }
@@ -252,7 +252,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             _debtPayment = Math.min(_debtOutstanding, wantBal);
 
             // make sure we pay our debt first, then count profit. if not enough to pay debt, then only loss.
-            if (wantBal > _debtPayment) {
+            if (wantBal >= _debtPayment) {
                 _profit = wantBal.sub(_debtPayment);
             } else {
                 _profit = 0;
@@ -308,7 +308,6 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
             uint256 _withdrawnBal = balanceOfWant();
             _liquidatedAmount = Math.min(_amountNeeded, _withdrawnBal);
-            _loss = _amountNeeded.sub(_liquidatedAmount);
         } else {
             // we have enough balance to cover the liquidation available
             return (_amountNeeded, 0);
@@ -334,10 +333,10 @@ contract StrategyImperamaxLender is BaseStrategy {
             uint256 suppliedToPool = wantSuppliedToPool(currentPool);
 
             // total liquidity available in the pool in want
-            uint256 PoolLiquidity = want.balanceOf(currentPool);
+            uint256 poolLiquidity = want.balanceOf(currentPool);
 
             // the minimum of the previous two values is the most want we can withdraw from this pool
-            uint256 ableToPullInUnderlying = Math.min(suppliedToPool, PoolLiquidity);
+            uint256 ableToPullInUnderlying = Math.min(suppliedToPool, poolLiquidity);
 
             // skip ahead to our next loop if we can't withdraw anything
             if (ableToPullInUnderlying == 0) {
@@ -350,7 +349,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             // check if we need to pull as much as possible from our pools
             if (params.debtRatio == 0 || _amountToWithdraw == type(uint256).max || vaultAPIExtended(address(vault)).emergencyShutdown()) {
                 // this is for withdrawing the maximum we safely can
-                if (PoolLiquidity > suppliedToPool) {
+                if (poolLiquidity > suppliedToPool) {
                     // if possible, burn our whole bToken position to avoid dust
                     uint256 balanceOfbToken = IBorrowable(currentPool).balanceOf(address(this));
                     IBorrowable(currentPool).transfer(currentPool, balanceOfbToken);
@@ -380,7 +379,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             else {
                 // if there is more free liquidity than our amount deposited, just burn the whole bToken balance so we don't have dust
                 uint256 pulled;
-                if (PoolLiquidity > suppliedToPool) {
+                if (poolLiquidity > suppliedToPool) {
                     uint256 balanceOfbToken = IBorrowable(currentPool).balanceOf(address(this));
                     IBorrowable(currentPool).transfer(currentPool, balanceOfbToken);
                     pulled = IBorrowable(currentPool).redeem(address(this));
@@ -398,6 +397,13 @@ contract StrategyImperamaxLender is BaseStrategy {
                     remainingUnderlyingNeeded = 0;
                 }
             }
+        }
+        if (_amountToWithdraw > withdrawn) {
+            // only allow losses here if we're shutting things down. don't want "accidental" paper losses from high utilization
+            require(
+                params.debtRatio == 0 || vaultAPIExtended(address(vault)).emergencyShutdown() || _amountToWithdraw == type(uint256).max,
+                "Low liquidity"
+            );
         }
     }
 
@@ -481,7 +487,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         uint256 suppliedToPool = wantSuppliedToPool(_poolToRemove);
 
         // total liquidity available in the pool in want
-        uint256 PoolLiquidity = want.balanceOf(_poolToRemove);
+        uint256 poolLiquidity = want.balanceOf(_poolToRemove);
 
         // get our exchange rate for this pool of bToken to want
         uint256 currentExchangeRate = IBorrowable(_poolToRemove).exchangeRateLast();
@@ -494,7 +500,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         delete pools;
 
         // Check if there is enough liquidity to withdraw our whole position immediately
-        if (PoolLiquidity > suppliedToPool) {
+        if (poolLiquidity > suppliedToPool) {
             // burn all of our bToken
             uint256 balanceOfbToken = IBorrowable(_poolToRemove).balanceOf(address(this));
             if (balanceOfbToken > 0) {
@@ -519,7 +525,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
         } else {
             // Otherwise withdraw the most want we can withdraw from this pool
-            uint256 ableToPullInUnderlying = Math.min(suppliedToPool, PoolLiquidity);
+            uint256 ableToPullInUnderlying = Math.min(suppliedToPool, poolLiquidity);
 
             // convert that to bToken and redeem (withdraw)
             uint256 ableToPullInbToken = ableToPullInUnderlying.mul(BTOKEN_DECIMALS).div(currentExchangeRate);
