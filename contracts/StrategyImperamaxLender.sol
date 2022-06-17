@@ -49,6 +49,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     // check for cloning
     bool internal isOriginal = true;
+    uint256 public dustThreshold = 2;
 
     /* ========== CONSTRUCTOR ========== */
 
@@ -251,12 +252,9 @@ contract StrategyImperamaxLender is BaseStrategy {
             wantBal = balanceOfWant();
             _debtPayment = Math.min(_debtOutstanding, wantBal);
 
-            // make sure we pay our debt first, then count profit. if not enough to pay debt, then only loss.
+            // make sure we pay our debt first, then count profit.
             if (wantBal >= _debtPayment) {
                 _profit = wantBal.sub(_debtPayment);
-            } else {
-                _profit = 0;
-                _loss = _debtPayment.sub(wantBal);
             }
         }
 
