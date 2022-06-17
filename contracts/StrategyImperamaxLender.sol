@@ -573,17 +573,6 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
     }
 
-    function manuallySetOrder(address[] memory _poolOrder) external onlyEmergencyAuthorized {
-        // new length must match number of pairs
-        require(_poolOrder.length == pools.length);
-
-        //Delete old entries and overwrite with new ones
-        delete pools;
-        for (uint256 i = 0; i < _poolOrder.length; i++) {
-            pools.push(_poolOrder[i]);
-        }
-    }
-
     ///@notice This allows us to manually harvest with our keeper as needed
     function setForceHarvestTriggerOnce(bool _forceHarvestTriggerOnce) external onlyAuthorized {
         forceHarvestTriggerOnce = _forceHarvestTriggerOnce;
