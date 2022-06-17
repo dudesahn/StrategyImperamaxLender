@@ -99,3 +99,11 @@ def test_setters(
     strategy.setEmergencyExit({"from": gov})
     with brownie.reverts():
         strategy.setEmergencyExit({"from": gov})
+
+    # Set dust threshold
+    new_dt = 10
+    current_dt = strategy.dustThreshold()
+
+    strategy.setDustThreshold(new_dt, {"from": gov})
+    set_dt = strategy.dustThreshold()
+    assert set_dt == new_dt
