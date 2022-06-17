@@ -69,6 +69,13 @@ contract StrategyImperamaxLender is BaseStrategy {
         stratName = _name;
     }
 
+    function setDustThreshold(uint256 _newDustThreshold)
+        external
+        onlyAuthorized
+    {
+        dustThreshold = _newDustThreshold;
+    }
+
     function initialize(
         address _vault,
         address _strategist,
