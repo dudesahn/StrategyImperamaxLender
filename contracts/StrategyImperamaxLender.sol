@@ -306,6 +306,15 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
             uint256 _withdrawnBal = balanceOfWant();
             _liquidatedAmount = Math.min(_amountNeeded, _withdrawnBal);
+
+            // To prevent the vault from moving on to the next strategy in the queue
+            // when we return the amountRequested minus dust, take a dust sized loss
+            if (_liquidatedAmount < _amountNeeded) {
+                uint256 diff = _amountNeeded.sub(_liquidatedAmount);
+                if (diff <= dustThreshold) {
+                    _loss = diff;
+                }
+            }
         } else {
             // we have enough balance to cover the liquidation available
             return (_amountNeeded, 0);
