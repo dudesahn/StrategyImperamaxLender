@@ -564,8 +564,13 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
         }
         require(pools.length == preventDeposits.length); // use this to ensure we didn't mess up the length of our arrays
+    }
 
-        // deposit our free want into our other pools
+    function depositManually() external onlyVaultManagers {
+        uint256 toInvest = balanceOfWant();
+        if (toInvest > 0) {
+            _deposit(toInvest);
+        }
     }
 
     function manuallySetOrder(address[] memory _poolOrder) external onlyEmergencyAuthorized {
