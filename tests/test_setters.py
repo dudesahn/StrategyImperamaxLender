@@ -91,19 +91,14 @@ def test_setters(
     # try a health check with random contract as health check
     strategy.setHealthCheck(gov, {"from": gov})
     strategy.setDoHealthCheck(True, {"from": gov})
-    # this is causing the RPC to crash now, weirdly
-    # with brownie.reverts():
-    # strategy.harvest({"from": gov})
 
     # set emergency exit last
     strategy.setEmergencyExit({"from": gov})
     with brownie.reverts():
         strategy.setEmergencyExit({"from": gov})
 
-    # Set dust threshold
+    # Set dust threshold, 
     new_dt = 10
-    current_dt = strategy.dustThreshold()
-
-    strategy.setDustThreshold(new_dt, {"from": gov})
+    strategy.setStrategyParams(False, new_dt, 1e24, {"from": gov})
     set_dt = strategy.dustThreshold()
     assert set_dt == new_dt

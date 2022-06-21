@@ -17,7 +17,7 @@ def test_custom_allocations(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -45,6 +45,44 @@ def test_custom_allocations(
     strategy.harvest({"from": gov})
 
 
+# manually deposit an airdrop to the strategy
+def test_manual_deposit(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+):
+
+    ## deposit to the vault after approving
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # send in our airdrop
+    decimals = token.decimals()
+    amount = 1000 * 10 ** decimals
+    token.transfer(strategy, amount, {"from": whale})
+    assert token.balanceOf(strategy) >= amount
+
+    # deploy to our strategy
+    strategy.tend({"from": gov})
+
+    # sleep for a day and harvest, turn off health check since big profit
+    chain.sleep(86400)
+    chain.mine(1)
+    strategy.setDoHealthCheck(False, {"from": gov})
+    tx = strategy.harvest({"from": gov})
+    profit = tx.events["Harvested"]["profit"]
+    assert profit >= amount
+    print("Profit:", profit / (10 ** decimals))
+
+
 # add a pair
 def test_add_pair(
     gov,
@@ -59,7 +97,7 @@ def test_add_pair(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -110,7 +148,7 @@ def test_add_max_pairs(
     if token.address == "0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83":
         ## deposit to the vault after approving
         startingWhale = token.balanceOf(whale)
-        token.approve(vault, 2**256 - 1, {"from": whale})
+        token.approve(vault, 2 ** 256 - 1, {"from": whale})
         vault.deposit(amount, {"from": whale})
         chain.sleep(1)
         strategy.harvest({"from": gov})
@@ -204,7 +242,7 @@ def test_remove_pair_free(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -227,6 +265,60 @@ def test_remove_pair_free(
     strategy.harvest({"from": gov})
 
 
+# remove a pair whenever it doesn't have any locked debt and then redeposit its assets
+def test_remove_pair_free_redeposit(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+):
+
+    ## deposit to the vault after approving
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2000, 2000, 3000, 3000]
+    tx = strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # check our starting allocations
+    alloc = strategy.getCurrentPoolAllocations()
+    print("Allocations prior to removal:", alloc)
+    total_1 = sum(alloc)
+
+    # record our positions
+    pos_0 = strategy.pools(0)
+
+    # remove a pair!
+    to_remove = pos_0
+    strategy.attemptToRemovePool(to_remove, {"from": gov})
+
+    # check our allocations after removal
+    alloc = strategy.getCurrentPoolAllocations()
+    print("Allocations after removal:", alloc)
+    total_2 = sum(alloc)
+    assert total_1 > total_2
+
+    # deploy funds back to other pools
+    strategy.tend({"from": gov})
+    alloc = strategy.getCurrentPoolAllocations()
+    print("Allocations after tending:", alloc)
+    total_3 = sum(alloc)
+    assert total_3 >= total_2
+
+    # sleep for a day and harvest
+    chain.sleep(86400)
+    chain.mine(1)
+    strategy.harvest({"from": gov})
+
+
 # deposit to pools, manually send out free liquidity from these pools to lock our funds up to simulate high utilization, then try to remove the pairs.
 def test_remove_pair_locked(
     gov,
@@ -241,7 +333,7 @@ def test_remove_pair_locked(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -638,7 +730,7 @@ def test_remove_pair_locked_reorder(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -897,7 +989,7 @@ def test_reorder_pairs(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1014,7 +1106,7 @@ def test_reorder_pairs(
     strategy.reorderPools({"from": gov})
 
     # turn off reorder
-    strategy.setReorder(False, {"from": gov})
+    strategy.setStrategyParams(False, 10, 1e24, {"from": gov})
 
     # sleep for a day and harvest
     chain.sleep(86400)
@@ -1050,7 +1142,7 @@ def test_high_utilization(
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     print("Starting Whale:", startingWhale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1109,7 +1201,7 @@ def test_high_utilization(
 
     # try out a full withdrawal, we should have to take a loss
     loss_okay = 10000
-    max_uint = 2**256 - 1
+    max_uint = 2 ** 256 - 1
 
     # this should revert since the whale would take a loss from the withdrawal
     with brownie.reverts():
@@ -1132,7 +1224,7 @@ def test_high_utilization_manual_allocation(
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     print("Starting Whale:", startingWhale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1216,7 +1308,7 @@ def test_emergency_withdraw(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1235,7 +1327,7 @@ def test_emergency_withdraw(
     print("These are our allocations before we do anything stupid:", allocations)
 
     # use our emergency withdraw to kill all of our bTokens
-    max_uint = 2**256 - 1
+    max_uint = 2 ** 256 - 1
     tx = strategy.emergencyWithdraw(max_uint, {"from": gov})
 
     # check pool utilizations
@@ -1263,7 +1355,7 @@ def test_deposit_harvest_withdraw(
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     print("Starting Whale:", startingWhale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     harvest = strategy.harvest({"from": gov})
@@ -1305,7 +1397,7 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     print("Starting Whale:", startingWhale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1416,7 +1508,7 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
     share_price = vault.pricePerShare()
     print("Share price:", share_price / (10 ** token.decimals()))
 
-    max_uint = 2**256 - 1
+    max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
@@ -1439,7 +1531,7 @@ def test_high_utilization_emergency_shutdown_from_vault_no_harvest(
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     print("Starting Whale:", startingWhale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1505,7 +1597,7 @@ def test_high_utilization_emergency_shutdown_from_vault_no_harvest(
     chain.sleep(1)
     chain.mine(1)
 
-    max_uint = 2**256 - 1
+    max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
@@ -1528,7 +1620,7 @@ def test_high_utilization_emergency_exit_harvest(
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     print("Starting Whale:", startingWhale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1604,7 +1696,7 @@ def test_high_utilization_emergency_exit_harvest(
     share_price = vault.pricePerShare()
     print("Share price:", share_price / (10 ** token.decimals()))
 
-    max_uint = 2**256 - 1
+    max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
@@ -1627,7 +1719,7 @@ def test_high_utilization_emergency_exit_no_harvest(
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     print("Starting Whale:", startingWhale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1693,7 +1785,7 @@ def test_high_utilization_emergency_exit_no_harvest(
     chain.sleep(1)
     chain.mine(1)
 
-    max_uint = 2**256 - 1
+    max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
@@ -1715,7 +1807,7 @@ def test_remove_pair_locked_and_unlock(
 
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -1844,7 +1936,7 @@ def test_remove_pair_locked_and_unlock(
     chain.sleep(1)
     chain.mine(1)
 
-    max_uint = 2**256 - 1
+    max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
