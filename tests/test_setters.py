@@ -31,6 +31,7 @@ def test_setters(
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be true.", tx)
     assert tx == True
+    chain.mine(1)
     tx_2 = strategy.harvest({"from": gov})
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
@@ -98,3 +99,11 @@ def test_setters(
     strategy.setEmergencyExit({"from": gov})
     with brownie.reverts():
         strategy.setEmergencyExit({"from": gov})
+
+    # Set dust threshold
+    new_dt = 10
+    current_dt = strategy.dustThreshold()
+
+    strategy.setDustThreshold(new_dt, {"from": gov})
+    set_dt = strategy.dustThreshold()
+    assert set_dt == new_dt

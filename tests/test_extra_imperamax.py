@@ -941,19 +941,6 @@ def test_reorder_pairs(
     chain.mine(1)
     strategy.harvest({"from": gov})
 
-    # next, reorder by manual preference
-    new_order = [pos_3, pos_2, pos_1, pos_0]
-    strategy.manuallySetOrder(new_order, {"from": gov})
-
-    # check allocations
-    allocations = strategy.getCurrentPoolAllocations({"from": whale})
-    print("These are our current allocations:", allocations)
-
-    # can't reorder with a different length
-    new_order_shorter = [pos_0, pos_3]
-    with brownie.reverts():
-        strategy.manuallySetOrder(new_order_shorter, {"from": gov})
-
     # check pool order
     third = strategy.getPools({"from": whale})
     print("\nPools after manual reorder:", third)

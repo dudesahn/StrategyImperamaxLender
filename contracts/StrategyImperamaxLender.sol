@@ -49,6 +49,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     // check for cloning
     bool internal isOriginal = true;
+    uint256 public dustThreshold = 2;
 
     /* ========== CONSTRUCTOR ========== */
 
@@ -66,6 +67,13 @@ contract StrategyImperamaxLender is BaseStrategy {
 
         // set our strategy's name
         stratName = _name;
+    }
+
+    function setDustThreshold(uint256 _newDustThreshold)
+        external
+        onlyAuthorized
+    {
+        dustThreshold = _newDustThreshold;
     }
 
     function initialize(
@@ -251,12 +259,9 @@ contract StrategyImperamaxLender is BaseStrategy {
             wantBal = balanceOfWant();
             _debtPayment = Math.min(_debtOutstanding, wantBal);
 
-            // make sure we pay our debt first, then count profit. if not enough to pay debt, then only loss.
+            // make sure we pay our debt first, then count profit.
             if (wantBal >= _debtPayment) {
                 _profit = wantBal.sub(_debtPayment);
-            } else {
-                _profit = 0;
-                _loss = _debtPayment.sub(wantBal);
             }
         }
 
@@ -308,6 +313,15 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
             uint256 _withdrawnBal = balanceOfWant();
             _liquidatedAmount = Math.min(_amountNeeded, _withdrawnBal);
+
+            // To prevent the vault from moving on to the next strategy in the queue
+            // when we return the amountRequested minus dust, take a dust sized loss
+            if (_liquidatedAmount < _amountNeeded) {
+                uint256 diff = _amountNeeded.sub(_liquidatedAmount);
+                if (diff <= dustThreshold) {
+                    _loss = diff;
+                }
+            }
         } else {
             // we have enough balance to cover the liquidation available
             return (_amountNeeded, 0);
@@ -550,18 +564,12 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
         }
         require(pools.length == preventDeposits.length); // use this to ensure we didn't mess up the length of our arrays
-
-        // deposit our free want into our other pools
     }
 
-    function manuallySetOrder(address[] memory _poolOrder) external onlyEmergencyAuthorized {
-        // new length must match number of pairs
-        require(_poolOrder.length == pools.length);
-
-        //Delete old entries and overwrite with new ones
-        delete pools;
-        for (uint256 i = 0; i < _poolOrder.length; i++) {
-            pools.push(_poolOrder[i]);
+    function depositManually() external onlyVaultManagers {
+        uint256 toInvest = balanceOfWant();
+        if (toInvest > 0) {
+            _deposit(toInvest);
         }
     }
 
