@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
-// Feel free to change the license, but this is what we use
-
-// Feel free to change this version of Solidity. We support >=0.6.0 <0.7.0;
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
 // These are the core Yearn libraries
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
-import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/math/Math.sol";
 
 import {BaseStrategy, StrategyParams} from "@yearnvaults/contracts/BaseStrategy.sol";
@@ -20,30 +14,23 @@ interface vaultAPIExtended {
     function emergencyShutdown() external view returns (bool);
 }
 
-/*
-Things I still need to add
-- manual allocation of funds
-- more tests for when funds are high utilization and we can't get all out
-- look over all comments here to make sure I didn't miss anything: https://github.com/yearn/yearn-strategies/issues/142
-*/
-
 contract StrategyImperamaxLender is BaseStrategy {
-    using SafeERC20 for IERC20;
     using Address for address;
-    using SafeMath for uint256;
 
     /* ========== STATE VARIABLES ========== */
 
-    uint256 private constant BASIS_PRECISION = 10000;
+    uint256 internal constant BASIS_PRECISION = 10000;
     uint256 internal constant BTOKEN_DECIMALS = 1e18;
 
     bool public reorder = true;
 
     //This records the current pools and allocations
-    address[] public pools;
-    bool[] public preventDeposits; // use this if we want to shut down a pool
+    address[] public pools; /// @notice These are the pools we deposit funds to.
+    bool[] public preventDeposits; /// @notice Set this to true if we want to shut down deposits to a pool.
+    uint256 public dustThreshold; /// @notice Amount we accept as a loss in liquidatePosition if we don't get 100% back due to rounding errors.
 
     bool internal forceHarvestTriggerOnce; // only set this to true externally when we want to trigger our keepers to harvest for us
+    uint256 public creditThreshold; /// @notice The amount of credit in underlying tokens that will automatically trigger a harvest.
 
     string internal stratName; // set our strategy name here
 
@@ -63,6 +50,7 @@ contract StrategyImperamaxLender is BaseStrategy {
     function _initializeStrat(string memory _name) internal {
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 2 days;
+        dustThreshold = 100; // amount of wei we allow in dust for losses
 
         // set our strategy's name
         stratName = _name;
@@ -75,11 +63,12 @@ contract StrategyImperamaxLender is BaseStrategy {
         address _keeper,
         string memory _name
     ) external {
-        //note: initialise can only be called once. in _initialize in BaseStrategy we have: require(address(want) == address(0), "Strategy already initialized");
+        //note: initialize can only be called once. in _initialize in BaseStrategy we have: require(address(want) == address(0), "Strategy already initialized");
         _initialize(_vault, _strategist, _rewards, _keeper);
         _initializeStrat(_name);
     }
 
+    /// @notice Use this to clone new strategies to vaults with different want.
     function cloneTarotLender(
         address _vault,
         address _strategist,
@@ -117,15 +106,13 @@ contract StrategyImperamaxLender is BaseStrategy {
         return want.balanceOf(address(this));
     }
 
-    /// @notice Returns value of want lent, held in the form of bTokens.
+    /// @notice Returns value of want lent out, held in the form of bTokens.
     function stakedBalance() public view returns (uint256 total) {
-        total = 0;
         for (uint256 i = 0; i < pools.length; i++) {
             // save some gas by storing locally
             address currentPool = pools[i];
 
             uint256 bTokenBalance = IBorrowable(currentPool).balanceOf(address(this));
-            // uint256 currentExchangeRate = trueExchangeRate(currentPool);
             uint256 currentExchangeRate = IBorrowable(currentPool).exchangeRateLast(); // <- this is the "correct" code using tarot's values
             total = total.add(bTokenBalance.mul(currentExchangeRate).div(BTOKEN_DECIMALS));
         }
@@ -166,15 +153,15 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
     }
 
-    // see how much want we have supplied to a given pool
+    // See how much want we have supplied to a given pool
     function wantSuppliedToPool(address _pool) internal view returns (uint256 wantBal) {
         uint256 bTokenBalance = IBorrowable(_pool).balanceOf(address(this));
         uint256 currentExchangeRate = IBorrowable(_pool).exchangeRateLast();
         wantBal = bTokenBalance.mul(currentExchangeRate).div(BTOKEN_DECIMALS);
     }
 
-    /// @notice Reorder our array of pools by increasing utilization. Deposits go to the last pool, withdrawals start from the front.
-    function reorderPools() public onlyEmergencyAuthorized {
+    /// @notice Reorder our array of pools by increasing utilization, as higher util = higher APR. Deposits go to the last pool, withdrawals start from the front.
+    function reorderPools() public onlyVaultManagers {
         if (pools.length > 1) {
             uint256[] memory utilizations = getEachPoolUtilization();
             _reorderPools(utilizations, 0, utilizations.length - 1);
@@ -251,12 +238,9 @@ contract StrategyImperamaxLender is BaseStrategy {
             wantBal = balanceOfWant();
             _debtPayment = Math.min(_debtOutstanding, wantBal);
 
-            // make sure we pay our debt first, then count profit. if not enough to pay debt, then only loss.
+            // make sure we pay our debt first, then count profit.
             if (wantBal >= _debtPayment) {
                 _profit = wantBal.sub(_debtPayment);
-            } else {
-                _profit = 0;
-                _loss = _debtPayment.sub(wantBal);
             }
         }
 
@@ -308,6 +292,15 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
             uint256 _withdrawnBal = balanceOfWant();
             _liquidatedAmount = Math.min(_amountNeeded, _withdrawnBal);
+
+            // To prevent the vault from moving on to the next strategy in the queue
+            // when we return the amountRequested minus dust, take a dust sized loss
+            if (_liquidatedAmount < _amountNeeded) {
+                uint256 diff = _amountNeeded.sub(_liquidatedAmount);
+                if (diff <= dustThreshold) {
+                    _loss = diff;
+                }
+            }
         } else {
             // we have enough balance to cover the liquidation available
             return (_amountNeeded, 0);
@@ -433,16 +426,15 @@ contract StrategyImperamaxLender is BaseStrategy {
     /* ========== PERIPHERAL MUTATIVE FUNCTIONS ========== */
 
     /// @notice Manually set allocations for our attached pools in bps (1 = 0.01%)
-    function manuallySetAllocations(uint256[] calldata _ratios) external onlyAuthorized {
-        // length of ratios must match number of pairs
-        require(_ratios.length == pools.length);
+    function manuallySetAllocations(uint256[] calldata _ratios) external onlyVaultManagers {
+        require(_ratios.length == pools.length, "Length not the same");
 
         uint256 totalRatio;
         for (uint256 i = 0; i < pools.length; i++) {
             totalRatio += _ratios[i];
         }
 
-        require(totalRatio == 10000); //ratios must add to 10000 bps
+        require(totalRatio == 10000, "Ratio must total 10000 bps");
 
         // Update our rates before reorganizing
         updateExchangeRates();
@@ -468,21 +460,21 @@ contract StrategyImperamaxLender is BaseStrategy {
         reorderPools();
     }
 
-    ///@notice Add another Tarot pool to our strategy for lending. This can only be called by governance.
+    /// @notice Add another Tarot pool to our strategy for lending. This can only be called by governance.
     function addTarotPool(address _newPool) external onlyGovernance {
         // asset must match want.
-        require(IBorrowable(_newPool).underlying() == address(want));
+        require(IBorrowable(_newPool).underlying() == address(want), "Wrong underlying token");
 
         for (uint256 i = 0; i < pools.length; i++) {
             // pool must not already be attached
-            require(_newPool != pools[i]);
+            require(_newPool != pools[i], "Pool already attached");
         }
         pools.push(_newPool);
         preventDeposits.push(false);
     }
 
     /// @notice This is used for shutting down lending to a particular pool gracefully. May need to be called more than once for a given pool.
-    function attemptToRemovePool(address _poolToRemove) external onlyEmergencyAuthorized {
+    function attemptToRemovePool(address _poolToRemove) external onlyVaultManagers {
         // amount strategy has supplied to this pool
         uint256 suppliedToPool = wantSuppliedToPool(_poolToRemove);
 
@@ -507,7 +499,7 @@ contract StrategyImperamaxLender is BaseStrategy {
                 IBorrowable(_poolToRemove).transfer(_poolToRemove, balanceOfbToken);
                 IBorrowable(_poolToRemove).redeem(address(this));
             }
-            require(IBorrowable(_poolToRemove).balanceOf(address(this)) == 0);
+            require(IBorrowable(_poolToRemove).balanceOf(address(this)) == 0, "Balance not zero");
 
             // we can now remove this pool from our array
             for (uint256 i = 0; i < boolHelperPool.length; i++) {
@@ -549,30 +541,29 @@ contract StrategyImperamaxLender is BaseStrategy {
                 pools.push(addressHelperPool[i]); // if we didn't remove a pool, make sure to add it back to our pools
             }
         }
-        require(pools.length == preventDeposits.length); // use this to ensure we didn't mess up the length of our arrays
-
-        // deposit our free want into our other pools
+        require(pools.length == preventDeposits.length, "Length of arrays mismatch"); // use this to ensure we didn't mess up the length of our arrays
     }
 
-    function manuallySetOrder(address[] memory _poolOrder) external onlyEmergencyAuthorized {
-        // new length must match number of pairs
-        require(_poolOrder.length == pools.length);
+    /* ========== SETTERS ========== */
 
-        //Delete old entries and overwrite with new ones
-        delete pools;
-        for (uint256 i = 0; i < _poolOrder.length; i++) {
-            pools.push(_poolOrder[i]);
-        }
-    }
-
-    ///@notice This allows us to manually harvest with our keeper as needed
-    function setForceHarvestTriggerOnce(bool _forceHarvestTriggerOnce) external onlyAuthorized {
+    /// @notice This allows us to manually harvest with our keeper as needed
+    function setForceHarvestTriggerOnce(bool _forceHarvestTriggerOnce) external onlyVaultManagers {
         forceHarvestTriggerOnce = _forceHarvestTriggerOnce;
     }
 
-    ///@notice This allows us to turn off automatic reordering during harvests
-    function setReorder(bool _reorder) external onlyAuthorized {
+    /// @notice This allows us to set custom parameters for our strategy
+    /// @param _reorder Use this to turn off automatic reordering during harvests.
+    /// @param _dustThreshold This sets what dust is. If we have less than this remaining after withdrawing, accept it as a loss.
+    /// @param _creditThreshold The amount of credit that will trigger a harvest automatically.
+    function setStrategyParams(
+        bool _reorder,
+        uint256 _dustThreshold,
+        uint256 _creditThreshold
+    ) external onlyVaultManagers {
+        require(_dustThreshold < 10000, "Your size is too much size");
+        dustThreshold = _dustThreshold;
         reorder = _reorder;
+        creditThreshold = _creditThreshold;
     }
 
     /* ========== KEEP3RS ========== */
@@ -587,6 +578,11 @@ contract StrategyImperamaxLender is BaseStrategy {
 
         // trigger if we want to manually harvest
         if (forceHarvestTriggerOnce) {
+            return true;
+        }
+
+        // harvest our credit if it's above our threshold
+        if (vault.creditAvailable() > creditThreshold) {
             return true;
         }
 

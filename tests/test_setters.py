@@ -31,6 +31,7 @@ def test_setters(
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be true.", tx)
     assert tx == True
+    chain.mine(1)
     tx_2 = strategy.harvest({"from": gov})
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
@@ -38,7 +39,7 @@ def test_setters(
 
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -90,11 +91,14 @@ def test_setters(
     # try a health check with random contract as health check
     strategy.setHealthCheck(gov, {"from": gov})
     strategy.setDoHealthCheck(True, {"from": gov})
-    # this is causing the RPC to crash now, weirdly
-    # with brownie.reverts():
-    # strategy.harvest({"from": gov})
 
     # set emergency exit last
     strategy.setEmergencyExit({"from": gov})
     with brownie.reverts():
         strategy.setEmergencyExit({"from": gov})
+
+    # Set dust threshold, 
+    new_dt = 10
+    strategy.setStrategyParams(False, new_dt, 1e24, {"from": gov})
+    set_dt = strategy.dustThreshold()
+    assert set_dt == new_dt
