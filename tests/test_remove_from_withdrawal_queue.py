@@ -27,7 +27,7 @@ def test_remove_from_withdrawal_queue(
     chain.sleep(1)
     before = strategy.estimatedTotalAssets()
 
-    # set emergency and exit, then confirm that the strategy has no funds
+    # remove strategy from our queue
     vault.removeStrategyFromQueue(strategy, {"from": gov})
     after = strategy.estimatedTotalAssets()
     assert before == after
@@ -44,3 +44,17 @@ def test_remove_from_withdrawal_queue(
         addresses,
     )
     assert not strategy.address in addresses
+
+    # re-add our strategy to the queue and make sure it still works
+    vault.addStrategyToQueue(strategy, {"from": gov})
+    after = strategy.estimatedTotalAssets()
+    assert before == after
+
+    # simulate 1 day of earnings, make sure we earn something
+    chain.sleep(86400)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+    after = strategy.estimatedTotalAssets()
+    assert after > before
+
+    
