@@ -451,13 +451,15 @@ contract StrategyImperamaxLender is BaseStrategy {
                 address targetPool = pools[i];
                 uint256 currentWantBalance = balanceOfWant();
                 uint256 toDeposit = Math.min(currentWantBalance, toAllocate);
-                want.transfer(targetPool, toDeposit);
+                want.safeTransfer(targetPool, toDeposit);
                 IBorrowable(targetPool).mint(address(this));
             }
         }
 
         // reorder our pools based on utilization
-        reorderPools();
+        if (reorder) {
+            reorderPools();
+        }
     }
 
     /// @notice Add another Tarot pool to our strategy for lending. This can only be called by governance.
@@ -475,6 +477,9 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     /// @notice This is used for shutting down lending to a particular pool gracefully. May need to be called more than once for a given pool.
     function attemptToRemovePool(address _poolToRemove) external onlyVaultManagers {
+        // update our exchange rate before removing
+        updateExchangeRates();
+
         // amount strategy has supplied to this pool
         uint256 suppliedToPool = wantSuppliedToPool(_poolToRemove);
 
