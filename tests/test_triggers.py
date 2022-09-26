@@ -14,6 +14,7 @@ def test_triggers(
     chain,
     strategist_ms,
     amount,
+    sleep_time,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
@@ -21,12 +22,18 @@ def test_triggers(
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
     starting_assets = vault.totalAssets()
+
+    # harvest should trigger true since we have a large credit
+    tx = strategy.harvestTrigger(0, {"from": gov})
+    print("\nShould we harvest? Should be true.", tx)
+    assert tx == True
+
     chain.sleep(1)
     strategy.harvest({"from": gov})
     chain.sleep(1)
 
-    # simulate a day of earnings
-    chain.sleep(86400)
+    # simulate earnings
+    chain.sleep(sleep_time)
     chain.mine(1)
 
     # harvest should trigger false; hasn't been long enough
@@ -34,8 +41,8 @@ def test_triggers(
     print("\nShould we harvest? Should be False.", tx)
     assert tx == False
 
-    # simulate 5 days of earnings
-    chain.sleep(86400 * 5)
+    # simulate enough time to be beyond our maxDelay
+    chain.sleep(strategy.maxReportDelay())
     chain.mine(1)
 
     # harvest should trigger true
@@ -43,8 +50,8 @@ def test_triggers(
     print("\nShould we harvest? Should be true.", tx)
     assert tx == True
 
-    # simulate 5 days of earnings
-    chain.sleep(86400 * 5)
+    # simulate earnings
+    chain.sleep(sleep_time)
     chain.mine(1)
 
     # harvest should trigger true
@@ -54,8 +61,13 @@ def test_triggers(
 
     # withdraw and confirm we made money
     strategy.harvest({"from": gov})
+
+    # wait 10 hours for our lockedProfit to be released
+    chain.sleep(3600 * 10)
     vault.withdraw({"from": whale})
-    assert token.balanceOf(whale) >= startingWhale
+    profit = token.balanceOf(whale) - startingWhale
+    assert profit > 0
+    print("Profit:", profit)
 
 
 def test_less_useful_triggers(
@@ -83,5 +95,3 @@ def test_less_useful_triggers(
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be False.", tx)
     assert tx == False
-
-    chain.sleep(200)

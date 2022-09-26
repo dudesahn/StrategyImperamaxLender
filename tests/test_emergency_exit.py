@@ -3,7 +3,7 @@ import brownie
 from brownie import Contract
 from brownie import config
 
-# test passes as of 21-06-26
+
 def test_emergency_exit(
     gov,
     token,
@@ -35,7 +35,7 @@ def test_emergency_exit(
     strategy.harvest({"from": gov})
     chain.sleep(1)
 
-    # since we earn yield every block, and converting to another token, it's hard to get rid of all of it
+    # since we earn yield every block, and are converting to another token, it's hard to get rid of all of it
     assert strategy.estimatedTotalAssets() < dust
     print(
         "This is how much we have leftover:",
@@ -59,6 +59,7 @@ def test_emergency_exit_with_profit(
     strategy,
     chain,
     amount,
+    dust,
 ):
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -72,19 +73,25 @@ def test_emergency_exit_with_profit(
     # simulate 1 day of earnings
     chain.sleep(86400)
     chain.mine(1)
-    chain.sleep(1)
     strategy.harvest({"from": gov})
-    chain.sleep(1)
+    chain.mine(1)
 
-    # set emergency and exit, then confirm that the strategy has no funds
-    donation = amount
+    # set emergency and exit, then confirm that the strategy has no funds except dust
+    donation = amount / 2
     token.transfer(strategy, donation, {"from": whale})
     strategy.setDoHealthCheck(False, {"from": gov})
     strategy.setEmergencyExit({"from": gov})
-    chain.sleep(1)
     strategy.harvest({"from": gov})
-    chain.sleep(1)
-    assert strategy.estimatedTotalAssets() == 0
+
+    # make sure we mine to update our views
+    chain.mine(1)
+
+    # since we earn yield every block, and are converting to another token, it's hard to get rid of all of it
+    assert strategy.estimatedTotalAssets() < dust
+    print(
+        "This is how much we have leftover:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # simulate a day of waiting for share price to bump back up
     chain.sleep(86400)
@@ -104,6 +111,7 @@ def test_emergency_exit_with_no_gain_or_loss(
     chain,
     amount,
     pools,
+    dust,
 ):
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -131,6 +139,8 @@ def test_emergency_exit_with_no_gain_or_loss(
     chain.sleep(1)
     strategy.harvest({"from": gov})
     chain.sleep(1)
+
+    # since we are only dealing in want tokens, we shouldn't have any dust left over
     assert strategy.estimatedTotalAssets() == 0
 
     # simulate a day of waiting for share price to bump back up

@@ -56,5 +56,3 @@ def test_remove_from_withdrawal_queue(
     chain.sleep(1)
     after = strategy.estimatedTotalAssets()
     assert after > before
-
-    

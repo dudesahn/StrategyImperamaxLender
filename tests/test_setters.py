@@ -82,6 +82,8 @@ def test_setters(
         strategy.setMaxReportDelay(1000, {"from": whale})
     with brownie.reverts():
         strategy.setRewards(strategist, {"from": whale})
+    with brownie.reverts():
+        strategy.setStrategyParams(True, 50_000, 1e24, {"from": gov})
 
     # try a health check with zero address as health check
     strategy.setHealthCheck(zero, {"from": gov})
@@ -97,7 +99,7 @@ def test_setters(
     with brownie.reverts():
         strategy.setEmergencyExit({"from": gov})
 
-    # Set dust threshold, 
+    # Set dust threshold
     new_dt = 10
     strategy.setStrategyParams(False, new_dt, 1e24, {"from": gov})
     set_dt = strategy.dustThreshold()

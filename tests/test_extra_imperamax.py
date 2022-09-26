@@ -1281,7 +1281,7 @@ def test_high_utilization_manual_allocation(
     assert utes[0] > old_utes[0]
     print("Pool utilizations after force increase:", utes)
 
-    # set our custom allocations
+    # Can't do custom allocations when we have 100% utilization on a pool
     new_allocations = [5000, 50, 4900, 50]
     tx = strategy.manuallySetAllocations(new_allocations, {"from": gov})
 
@@ -1327,8 +1327,7 @@ def test_emergency_withdraw(
     print("These are our allocations before we do anything stupid:", allocations)
 
     # use our emergency withdraw to kill all of our bTokens
-    max_uint = 2 ** 256 - 1
-    tx = strategy.emergencyWithdraw(max_uint, {"from": gov})
+    tx = strategy.emergencyWithdraw(strategy.stakedBalance(), {"from": gov})
 
     # check pool utilizations
     new_utes = strategy.getEachPoolUtilization({"from": whale})
@@ -1378,8 +1377,6 @@ def test_deposit_harvest_withdraw(
     if net < 0:
         print("\nWe lost a few wei, this many:", net * -1, "wei")
 
-    assert net >= 0  # do this to force a revert so we can debug why we reverted
-
 
 # do emergency shutdown from vault with a harvest, but with some of the assets locked in a pool
 def test_high_utilization_emergency_shutdown_from_vault_harvest(
@@ -1392,6 +1389,8 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
     chain,
     amount,
     accounts,
+    pools,
+    dust,
 ):
 
     ## deposit to the vault after approving
@@ -1506,18 +1505,37 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
 
     # check our vault share price
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / (10 ** token.decimals()))
+    print("\nShare price:", share_price / (10 ** token.decimals()))
 
     print(
         "Strategy Debt:",
         vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
     )
 
     max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
-    print("These are our losses:", losses / (10 ** token.decimals()))
+    print(
+        "\nThese are our losses after withdrawing:", losses / (10 ** token.decimals())
+    )
+
+    # check our vault share price
+    share_price = vault.pricePerShare()
+    print("Share price:", share_price / (10 ** token.decimals()))
+
+    print(
+        "Strategy Debt:",
+        vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
 
 # do emergency shutdown from vault without a harvest, but with some of the assets locked in a pool
@@ -1602,15 +1620,24 @@ def test_high_utilization_emergency_shutdown_from_vault_no_harvest(
     chain.sleep(1)
     chain.mine(1)
 
-    max_uint = 2 ** 256 - 1
-    loss_okay = 10000
-    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
-    losses = token.balanceOf(whale) - startingWhale
-    print("These are our whale's losses:", losses / (10 ** token.decimals()))
-
     # check our vault share price
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / (10 ** token.decimals()))
+    print("\nShare price:", share_price / (10 ** token.decimals()))
+
+    print(
+        "Strategy Debt:",
+        vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
+
+    # withdrawals revert if we took a loss and haven't harvested yet to book the losses
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    with brownie.reverts():
+        tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
 
 
 # do emergency exit from strategy with a harvest, but with some of the assets locked in a pool
@@ -1703,13 +1730,37 @@ def test_high_utilization_emergency_exit_harvest(
 
     # check our vault share price, it should have gone down to like 0.5
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / (10 ** token.decimals()))
+    print("\nShare price:", share_price / (10 ** token.decimals()))
+
+    print(
+        "Strategy Debt:",
+        vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
-    print("These are our losses:", losses / (10 ** token.decimals()))
+    print(
+        "\nThese are our losses after withdrawing:", losses / (10 ** token.decimals())
+    )
+
+    # check our vault share price
+    share_price = vault.pricePerShare()
+    print("Share price:", share_price / (10 ** token.decimals()))
+
+    print(
+        "Strategy Debt:",
+        vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
 
 # do emergency exit from strategy without a harvest, but with some of the assets locked in a pool
@@ -1794,15 +1845,24 @@ def test_high_utilization_emergency_exit_no_harvest(
     chain.sleep(1)
     chain.mine(1)
 
-    max_uint = 2 ** 256 - 1
-    loss_okay = 10000
-    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
-    losses = token.balanceOf(whale) - startingWhale
-    print("These are our whale's losses:", losses / (10 ** token.decimals()))
-
     # check our vault share price
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / (10 ** token.decimals()))
+    print("\nShare price:", share_price / (10 ** token.decimals()))
+
+    print(
+        "Strategy Debt:",
+        vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
+
+    # withdrawals revert if we took a loss and haven't harvested yet to book the losses
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    with brownie.reverts():
+        tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
 
 
 # do revoke from vault with a harvest, but with some of the assets locked in a pool
@@ -1930,18 +1990,37 @@ def test_high_utilization_revoke_from_vault_harvest(
 
     # check our vault share price
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / (10 ** token.decimals()))
+    print("\nShare price:", share_price / (10 ** token.decimals()))
 
     print(
         "Strategy Debt:",
         vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
     )
 
     max_uint = 2 ** 256 - 1
     loss_okay = 10000
     tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
-    print("These are our losses:", losses / (10 ** token.decimals()))
+    print(
+        "\nThese are our losses after withdrawing:", losses / (10 ** token.decimals())
+    )
+
+    # check our vault share price
+    share_price = vault.pricePerShare()
+    print("Share price:", share_price / (10 ** token.decimals()))
+
+    print(
+        "Strategy Debt:",
+        vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
 
 # do revoke from vault without a harvest, but with some of the assets locked in a pool
@@ -2026,15 +2105,24 @@ def test_high_utilization_revoke_from_vault_no_harvest(
     chain.sleep(1)
     chain.mine(1)
 
-    max_uint = 2 ** 256 - 1
-    loss_okay = 10000
-    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
-    losses = token.balanceOf(whale) - startingWhale
-    print("These are our whale's losses:", losses / (10 ** token.decimals()))
-
     # check our vault share price
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / (10 ** token.decimals()))
+    print("\nShare price:", share_price / (10 ** token.decimals()))
+
+    print(
+        "Strategy Debt:",
+        vault.strategies(strategy.address)["totalDebt"] / (10 ** token.decimals()),
+    )
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
+
+    # withdrawals revert if we took a loss and haven't harvested yet to book the losses
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    with brownie.reverts():
+        tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
 
 
 # deposit to pools, manually send out free liquidity from these pools to lock our funds up to simulate high utilization, then send it back

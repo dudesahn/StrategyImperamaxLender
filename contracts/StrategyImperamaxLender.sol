@@ -51,6 +51,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 2 days;
         dustThreshold = 100; // amount of wei we allow in dust for losses
+        creditThreshold = 100_000e18; // amount of credit (in want) that triggers a harvest
 
         // set our strategy's name
         stratName = _name;
@@ -108,6 +109,9 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     /// @notice Returns value of want lent out, held in the form of bTokens.
     function stakedBalance() public view returns (uint256 total) {
+        // update our rates to get an accurate picture
+        updateExchangeRates();
+
         for (uint256 i = 0; i < pools.length; i++) {
             // save some gas by storing locally
             address currentPool = pools[i];
@@ -220,27 +224,30 @@ contract StrategyImperamaxLender is BaseStrategy {
 
         if (assets >= debt) {
             // prevent overflow if we have losses
-            _profit = assets.sub(debt);
+            _profit = assets - debt;
         } else {
-            _loss = debt.sub(assets);
+            _loss = debt - assets;
         }
 
         _debtPayment = _debtOutstanding;
-        uint256 toFree = _debtPayment.add(_profit);
+        uint256 totalToFree = _debtPayment.add(_profit);
 
         // this will almost always be true
-        if (toFree > wantBal) {
-            toFree = toFree.sub(wantBal);
+        if (totalToFree > wantBal) {
+            uint256 netToFree = totalToFree - wantBal;
 
-            _withdraw(toFree);
+            _withdraw(netToFree);
 
             // check what we got back out
             wantBal = balanceOfWant();
-            _debtPayment = Math.min(_debtOutstanding, wantBal);
 
             // make sure we pay our debt first, then count profit.
-            if (wantBal >= _debtPayment) {
-                _profit = wantBal.sub(_debtPayment);
+            if (wantBal >= _debtOutstanding) {
+                _profit = wantBal - _debtOutstanding;
+            } else {
+                _profit = 0;
+                _loss = _debtOutstanding - wantBal;
+                _debtPayment = wantBal;
             }
         }
 
@@ -288,26 +295,20 @@ contract StrategyImperamaxLender is BaseStrategy {
             uint256 _stakedBal = stakedBalance();
             if (_stakedBal > 0) {
                 uint256 amountToWithdraw = (Math.min(_stakedBal, _amountNeeded.sub(_wantBal)));
-                _withdraw(amountToWithdraw);
+                // To prevent the vault from moving on to the next strategy in the queue
+                // if amountToWithdraw is less than our dustThreshold, take a dust-sized loss
+                _loss = _withdraw(amountToWithdraw);
+                require(_loss < dustThreshold, "Loss larger than dustThreshold");
             }
             uint256 _withdrawnBal = balanceOfWant();
             _liquidatedAmount = Math.min(_amountNeeded, _withdrawnBal);
-
-            // To prevent the vault from moving on to the next strategy in the queue
-            // when we return the amountRequested minus dust, take a dust sized loss
-            if (_liquidatedAmount < _amountNeeded) {
-                uint256 diff = _amountNeeded.sub(_liquidatedAmount);
-                if (diff <= dustThreshold) {
-                    _loss = diff;
-                }
-            }
         } else {
             // we have enough balance to cover the liquidation available
             return (_amountNeeded, 0);
         }
     }
 
-    function _withdraw(uint256 _amountToWithdraw) internal {
+    function _withdraw(uint256 _amountToWithdraw) internal returns (uint256 withdrawalLoss) {
         // Update our rates before trying to withdraw
         updateExchangeRates();
 
@@ -339,25 +340,8 @@ contract StrategyImperamaxLender is BaseStrategy {
             // figure out how much bToken we are able to burn from this pool for want.
             uint256 ableToPullInbToken = ableToPullInUnderlying.mul(BTOKEN_DECIMALS).div(IBorrowable(currentPool).exchangeRateLast());
 
-            // check if we need to pull as much as possible from our pools
-            if (params.debtRatio == 0 || _amountToWithdraw == type(uint256).max || vaultAPIExtended(address(vault)).emergencyShutdown()) {
-                // this is for withdrawing the maximum we safely can
-                if (poolLiquidity > suppliedToPool) {
-                    // if possible, burn our whole bToken position to avoid dust
-                    uint256 balanceOfbToken = IBorrowable(currentPool).balanceOf(address(this));
-                    IBorrowable(currentPool).transfer(currentPool, balanceOfbToken);
-                    IBorrowable(currentPool).redeem(address(this));
-                } else {
-                    // otherwise, withdraw as much as we can
-                    IBorrowable(currentPool).transfer(currentPool, ableToPullInbToken);
-                    IBorrowable(currentPool).redeem(address(this));
-                }
-                continue;
-            }
-
-            // this is how much we need, converted to the bTokens of this specific pool. add 5 wei as a buffer for calculation losses.
-            uint256 remainingbTokenNeeded =
-                remainingUnderlyingNeeded.mul(BTOKEN_DECIMALS).div(IBorrowable(currentPool).exchangeRateLast()).add(5);
+            // this is how much we need, converted to the bTokens of this specific pool.
+            uint256 remainingbTokenNeeded = remainingUnderlyingNeeded.mul(BTOKEN_DECIMALS).div(IBorrowable(currentPool).exchangeRateLast());
 
             // Withdraw all we need from the current pool if we can
             if (ableToPullInbToken > remainingbTokenNeeded) {
@@ -383,30 +367,27 @@ contract StrategyImperamaxLender is BaseStrategy {
                 // add what we just withdrew to our total, subtract it from what we still need
                 withdrawn = withdrawn.add(pulled);
 
-                // don't want to overflow
+                // don't want to overflow if we have a few wei extra
                 if (remainingUnderlyingNeeded > pulled) {
                     remainingUnderlyingNeeded = remainingUnderlyingNeeded.sub(pulled);
                 } else {
-                    remainingUnderlyingNeeded = 0;
+                    break;
                 }
             }
         }
-        if (_amountToWithdraw > withdrawn) {
-            // only allow losses here if we're shutting things down. don't want "accidental" paper losses from high utilization
-            require(
-                params.debtRatio == 0 || vaultAPIExtended(address(vault)).emergencyShutdown() || _amountToWithdraw == type(uint256).max,
-                "Low liquidity"
-            );
-        }
+
+        // check our losses, this will also count 100% utilized funds as losses
+        withdrawalLoss = _amountToWithdraw.sub(withdrawn);
     }
 
+    /// @notice This function will only be used by vault managers in emergency situation to withdraw exactly as much as we are allowed. to retrieve all funds, use stakedBalance() as input.
     function emergencyWithdraw(uint256 _amountToWithdraw) external onlyEmergencyAuthorized {
         _withdraw(_amountToWithdraw);
     }
 
     // this will withdraw the maximum we can based on free liquidity and take a loss for any locked funds
     function liquidateAllPositions() internal virtual override returns (uint256 _liquidatedAmount) {
-        _withdraw(type(uint256).max);
+        _withdraw(stakedBalance());
         _liquidatedAmount = balanceOfWant();
     }
 
@@ -436,13 +417,8 @@ contract StrategyImperamaxLender is BaseStrategy {
 
         require(totalRatio == 10000, "Ratio must total 10000 bps");
 
-        // Update our rates before reorganizing
-        updateExchangeRates();
-
-        // withdraw the max we can from our pools before re-allocating
-        _withdraw(type(uint256).max);
-
-        // if some amount is locked in some pools, we don't care
+        // withdraw all funds from our pools before re-allocating
+        _withdraw(stakedBalance());
         uint256 startingWantBalance = balanceOfWant();
 
         for (uint256 i = 0; i < pools.length; i++) {
@@ -475,7 +451,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         preventDeposits.push(false);
     }
 
-    /// @notice This is used for shutting down lending to a particular pool gracefully. May need to be called more than once for a given pool.
+    /// @notice This is used for shutting down lending to a particular pool gracefully. May need to be called more than once for a pool if we can't get all funds out immediately.
     function attemptToRemovePool(address _poolToRemove) external onlyVaultManagers {
         // update our exchange rate before removing
         updateExchangeRates();
