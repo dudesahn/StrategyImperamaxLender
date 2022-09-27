@@ -77,7 +77,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         address _keeper,
         string memory _name
     ) external returns (address newStrategy) {
-        require(isOriginal);
+        require(isOriginal, "Can't clone a clone");
 
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(address(this));
@@ -112,7 +112,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         // update our rates to get an accurate picture
         updateExchangeRates();
 
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             // save some gas by storing locally
             address currentPool = pools[i];
 
@@ -129,8 +129,11 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     /// @notice This returns the utilization (borrowed / total deposited) of each of our pools out of 10000.
     function getEachPoolUtilization() public view returns (uint256[] memory utilization) {
+        // update our rates to get an accurate picture
+        updateExchangeRates();
+
         utilization = new uint256[](pools.length);
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             // save some gas by storing locally
             address currentPool = pools[i];
 
@@ -144,7 +147,7 @@ contract StrategyImperamaxLender is BaseStrategy {
     /// @notice This returns the allocation of our want balance to each pool
     function getCurrentPoolAllocations() external view returns (uint256[] memory allocation) {
         allocation = new uint256[](pools.length);
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             allocation[i] = wantSuppliedToPool(pools[i]);
         }
     }
@@ -152,7 +155,7 @@ contract StrategyImperamaxLender is BaseStrategy {
     /// @notice View the current order of our pool addresses in use.
     function getPools() external view returns (address[] memory poolsOrder) {
         poolsOrder = new address[](pools.length);
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             poolsOrder[i] = pools[i];
         }
     }
@@ -257,7 +260,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     function updateExchangeRates() internal {
         // Update all the rates before harvest or withdrawals
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             address targetPool = pools[i];
 
             IBorrowable(targetPool).exchangeRate();
@@ -277,7 +280,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     function _deposit(uint256 _depositAmount) internal {
         // Deposit to highest utilization pair, which should be last in our pools array
-        for (uint256 i = (pools.length - 1); i >= 0; i--) {
+        for (uint256 i = (pools.length - 1); i >= 0; --i) {
             if (!preventDeposits[i]) {
                 // only deposit to this pool if it's not shutting down.
                 address targetPool = pools[i];
@@ -319,7 +322,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         // use this to check if our debtRatio is 0
         StrategyParams memory params = vault.strategies(address(this));
 
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             // save some gas by storing locally
             address currentPool = pools[i];
 
@@ -393,7 +396,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     // transfer our bTokens directly to our new strategy
     function prepareMigration(address _newStrategy) internal override {
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             // save some gas by storing locally
             IBorrowable bToken = IBorrowable(pools[i]);
 
@@ -411,7 +414,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         require(_ratios.length == pools.length, "Length not the same");
 
         uint256 totalRatio;
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             totalRatio += _ratios[i];
         }
 
@@ -421,7 +424,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         _withdraw(stakedBalance());
         uint256 startingWantBalance = balanceOfWant();
 
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             uint256 toAllocate = _ratios[i].mul(startingWantBalance).div(BASIS_PRECISION);
             if (toAllocate > 0) {
                 address targetPool = pools[i];
@@ -443,7 +446,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         // asset must match want.
         require(IBorrowable(_newPool).underlying() == address(want), "Wrong underlying token");
 
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = 0; i < pools.length; ++i) {
             // pool must not already be attached
             require(_newPool != pools[i], "Pool already attached");
         }
@@ -483,16 +486,13 @@ contract StrategyImperamaxLender is BaseStrategy {
             require(IBorrowable(_poolToRemove).balanceOf(address(this)) == 0, "Balance not zero");
 
             // we can now remove this pool from our array
-            for (uint256 i = 0; i < boolHelperPool.length; i++) {
+            for (uint256 i = 0; i < boolHelperPool.length; ++i) {
                 if (addressHelperPool[i] == _poolToRemove) {
                     // we don't want to re-add the pool we just successfully emptied
                     continue;
-                } else if (!boolHelperPool[i]) {
-                    // these are normal pools that allow deposits
-                    preventDeposits.push(false);
                 } else {
-                    // if the pool is emptying but not the one we're removing, leave it as true.
-                    preventDeposits.push(true);
+                    // don't alter this for any other pools
+                    preventDeposits.push(boolHelperPool[i]);
                 }
                 pools.push(addressHelperPool[i]); // if we didn't remove a pool, make sure to add it back to our pools
             }
@@ -508,16 +508,13 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
 
             // we can now remove this pool from our array
-            for (uint256 i = 0; i < boolHelperPool.length; i++) {
+            for (uint256 i = 0; i < boolHelperPool.length; ++i) {
                 if (addressHelperPool[i] == _poolToRemove) {
                     // this is our pool we are targeting, but it's not empty yet
                     preventDeposits.push(true);
-                } else if (!boolHelperPool[i]) {
-                    // these are normal pools that allow deposits
-                    preventDeposits.push(false);
                 } else {
-                    // this allows us to be emptying multiple pools at once. if the pool is emptying but not the one we're removing, leave it alone.
-                    preventDeposits.push(true);
+                    // don't alter this for any other pools
+                    preventDeposits.push(boolHelperPool[i]);
                 }
                 pools.push(addressHelperPool[i]); // if we didn't remove a pool, make sure to add it back to our pools
             }
