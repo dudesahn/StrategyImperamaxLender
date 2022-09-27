@@ -329,11 +329,6 @@ contract StrategyImperamaxLender is BaseStrategy {
             // the minimum of the previous two values is the most want we can withdraw from this pool
             uint256 ableToPullInUnderlying = Math.min(suppliedToPool, poolLiquidity);
 
-            // skip ahead to our next loop if we can't withdraw anything
-            if (ableToPullInUnderlying == 0) {
-                continue;
-            }
-
             // figure out how much bToken we are able to burn from this pool for want.
             uint256 ableToPullInbToken = ableToPullInUnderlying.mul(BTOKEN_DECIMALS).div(IBorrowable(currentPool).exchangeRateLast());
 
@@ -348,11 +343,13 @@ contract StrategyImperamaxLender is BaseStrategy {
                 // add what we just withdrew to our total
                 withdrawn = withdrawn.add(pulled);
                 break;
-            }
-            //Otherwise withdraw what we can from current pool
-            else {
-                // if there is more free liquidity than our amount deposited, just burn the whole bToken balance so we don't have dust
+            } else if (ableToPullInUnderlying == 0) {
+                // skip ahead to our next loop if we can't withdraw anything
+                continue;
+            } else {
+                // Otherwise withdraw what we can from current pool before we move on to the next
                 uint256 pulled;
+                // if there is more free liquidity than our amount deposited, just burn the whole bToken balance so we don't have dust
                 if (poolLiquidity > suppliedToPool) {
                     uint256 balanceOfbToken = IBorrowable(currentPool).balanceOf(address(this));
                     IBorrowable(currentPool).transfer(currentPool, balanceOfbToken);
@@ -364,9 +361,9 @@ contract StrategyImperamaxLender is BaseStrategy {
                 // add what we just withdrew to our total, subtract it from what we still need
                 withdrawn = withdrawn.add(pulled);
 
-                // don't want to overflow if we have a few wei extra
+                // don't want to overflow if we have a few wei extra, or keep going if we're only dust away from our target
                 if (remainingUnderlyingNeeded > pulled) {
-                    remainingUnderlyingNeeded = remainingUnderlyingNeeded.sub(pulled);
+                    remainingUnderlyingNeeded = remainingUnderlyingNeeded - pulled;
                 } else {
                     break;
                 }
