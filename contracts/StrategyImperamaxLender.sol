@@ -50,7 +50,7 @@ contract StrategyImperamaxLender is BaseStrategy {
     function _initializeStrat(string memory _name) internal {
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 2 days;
-        dustThreshold = 100; // amount of wei we allow in dust for losses
+        dustThreshold = 1000; // amount of wei we allow in dust for losses
         creditThreshold = 100_000e18; // amount of credit (in want) that triggers a harvest
 
         // set our strategy's name
@@ -109,9 +109,6 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     /// @notice Returns value of want lent out, held in the form of bTokens.
     function stakedBalance() public view returns (uint256 total) {
-        // update our rates to get an accurate picture
-        updateExchangeRates();
-
         for (uint256 i = 0; i < pools.length; ++i) {
             // save some gas by storing locally
             address currentPool = pools[i];
@@ -129,9 +126,6 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     /// @notice This returns the utilization (borrowed / total deposited) of each of our pools out of 10000.
     function getEachPoolUtilization() public view returns (uint256[] memory utilization) {
-        // update our rates to get an accurate picture
-        updateExchangeRates();
-
         utilization = new uint256[](pools.length);
         for (uint256 i = 0; i < pools.length; ++i) {
             // save some gas by storing locally
@@ -390,6 +384,10 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     // this will withdraw the maximum we can based on free liquidity and take a loss for any locked funds
     function liquidateAllPositions() internal virtual override returns (uint256 _liquidatedAmount) {
+        // update our rates so we withdraw the max
+        updateExchangeRates();
+
+        // make our withdrawal
         _withdraw(stakedBalance());
         _liquidatedAmount = balanceOfWant();
     }
@@ -419,6 +417,9 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
 
         require(totalRatio == 10000, "Ratio must total 10000 bps");
+
+        // update our rates so we withdraw the max
+        updateExchangeRates();
 
         // withdraw all funds from our pools before re-allocating
         _withdraw(stakedBalance());
