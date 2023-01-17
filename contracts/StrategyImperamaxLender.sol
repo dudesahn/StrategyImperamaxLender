@@ -223,27 +223,35 @@ contract StrategyImperamaxLender is BaseStrategy {
             // prevent overflow if we have losses
             _profit = assets - debt;
         } else {
+            // _loss is only positive here if we've somehow lost bTokens
             _loss = debt - assets;
         }
 
         _debtPayment = _debtOutstanding;
+
+        // free up our outstanding debt, as well as any profit we'd like to report
         uint256 totalToFree = _debtPayment.add(_profit);
 
-        // this will almost always be true
+        // this will almost always be true under normal operations
         if (totalToFree > wantBal) {
             uint256 netToFree = totalToFree - wantBal;
 
-            _withdraw(netToFree);
+            // _withdraw returns any losses from attempted withdrawal, so add it to existing _loss
+            _loss = _loss.add(_withdraw(netToFree));
 
             // check what we got back out
             wantBal = balanceOfWant();
 
-            // make sure we pay our debt first, then count profit.
-            if (wantBal >= _debtOutstanding) {
-                _profit = wantBal - _debtOutstanding;
+            // make sure we pay our debt and offset losses first, then count profit
+            if (wantBal >= _debtOutstanding.add(_loss)) {
+                // profits are able to offset any losses we incurred while withdrawing. if these funds unlock later, they will count as profit then
+                _profit = wantBal - _debtOutstanding.add(_loss);
+                _loss = 0;
             } else {
                 _profit = 0;
-                _loss = _debtOutstanding - wantBal;
+
+                // we take the minimum of either our full debt (max loss), or our total losses (bTokens + on withdrawal) minus any profits we took
+                _loss = Math.min(debt, _loss - _profit);
                 _debtPayment = wantBal;
             }
         }
@@ -291,7 +299,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             // check if we have enough free funds to cover the withdrawal
             uint256 _stakedBal = stakedBalance();
             if (_stakedBal > 0) {
-                uint256 amountToWithdraw = (Math.min(_stakedBal, _amountNeeded.sub(_wantBal)));
+                uint256 amountToWithdraw = (Math.min(_stakedBal, _amountNeeded - _wantBal));
                 // To prevent the vault from moving on to the next strategy in the queue
                 // if amountToWithdraw is less than our dustThreshold, take a dust-sized loss
                 _loss = _withdraw(amountToWithdraw);
@@ -363,7 +371,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
                 // don't want to overflow if we have a few wei extra, or keep going if we're only dust away from our target
                 if (remainingUnderlyingNeeded > pulled) {
-                    remainingUnderlyingNeeded = remainingUnderlyingNeeded - pulled;
+                    remainingUnderlyingNeeded -= pulled;
                 } else {
                     break;
                 }
@@ -371,7 +379,9 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
 
         // check our losses, this will also count 100% utilized funds as losses
-        withdrawalLoss = _amountToWithdraw.sub(withdrawn);
+        if (_amountToWithdraw > withdrawn) {
+            withdrawalLoss = _amountToWithdraw - withdrawn;
+        }
     }
 
     /// @notice This function will only be used by vault managers in emergency situation to withdraw exactly as much as we are allowed. to retrieve all funds, use stakedBalance() as input.

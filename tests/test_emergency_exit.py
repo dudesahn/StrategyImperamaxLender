@@ -26,7 +26,7 @@ def test_emergency_exit(
     chain.sleep(86400)
     chain.mine(1)
     chain.sleep(1)
-    strategy.harvest({"from": gov})
+    tx = strategy.harvest({"from": gov})
     chain.sleep(1)
 
     # set emergency and exit, then confirm that the strategy has no funds
@@ -73,7 +73,7 @@ def test_emergency_exit_with_profit(
     # simulate 1 day of earnings
     chain.sleep(86400)
     chain.mine(1)
-    strategy.harvest({"from": gov})
+    tx = strategy.harvest({"from": gov})
     chain.mine(1)
 
     # set emergency and exit, then confirm that the strategy has no funds except dust

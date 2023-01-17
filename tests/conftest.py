@@ -39,10 +39,10 @@ def strategy_name():
 # use this if your vault is already deployed
 @pytest.fixture(scope="session")
 def vault_address():
-    vault_address = ZERO_ADDRESS
+    vault_address = "0x2b5072170F75314C06e7553b4dEdd818F1d994F2"
     # live vault = 0x0DEC85e74A92c52b7F708c4B10207D9560CEFaf0
     # normal new vault: 0x1482Faf8b5A9c458c94e6A561cCF93ed7A9f552E
-    # new vault with new event to debug withdrawal error: 0x2b5072170F75314C06e7553b4dEdd818F1d994F2
+    # new vault with new event to debug withdrawal error: 
     yield vault_address
 
 
